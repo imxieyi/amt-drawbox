@@ -25,6 +25,62 @@
         imgVal: '',
         boolean: true
     };
+    var wsurl="wss://127.0.0.1:8443/websocket_server/mark";
+
+    //Check Browser Compatibility
+    //Codes are from html5test.com
+    function chkCompatibility(){
+      //Check Color Input Types
+      var createInput = function (type) {
+        var field = document.createElement('input');
+        try {
+            field.setAttribute('type', type);
+        } catch (e) {
+        }
+        return field;
+      };
+      var element = createInput('color');
+      element.value = "foobar";
+      var sanitization = element.value != 'foobar';
+      if(!((element.type=='color')&&(element.value!='foobar'))){
+        alert("Your browser does not support color input types!");
+        return false;
+      }
+
+      //Check WebSocket
+      if(!('WebSocket' in window)){
+        alert("Your browser does not support websocket!");
+        return false;
+      }
+
+      //Check JSON support
+      if(!('JSON' in window && 'parse' in JSON)){
+        alert("Your browser does not support JSON Encoding!");
+        return false;
+      }
+
+      return true;
+    }
+    if(chkCompatibility()){
+      //alert("Compatibility check passed!");
+    }else{
+      alert("Compatibility check failed!");
+    }
+
+    // Get URL parameters
+  	// http://www.cnblogs.com/shengxiang/archive/2011/09/19/2181629.html
+  	function GetURLParam(name)
+  	{
+  		var reg = new RegExp("(^|&)"+ name +"=([^&]*)(&|$)");
+  		var r = window.location.search.substr(1).match(reg);
+  		if (r!=null) return unescape(r[2]);
+  		return null;
+  	}
+
+    //Check assignmentId
+    if(GetURLParam("assignmentId")=="ASSIGNMENT_ID_NOT_AVAILABLE"){
+      document.getElementById("submit").style.display="none";
+    }
 
     /*
      * Global, short, usable functions
@@ -57,10 +113,47 @@
     }
 
     function changeSource() {
-        var imgNum = Math.ceil(Math.random() * g.numImg);
-        g.imgVal = 'pictures/img' + imgNum + '.jpg';
-        $('.zoom')[0].src = g.imgVal;
-        $('.zoom').attr('data-magnify-src', g.imgVal);
+      var websocket=new WebSocket(wsurl);
+      var imgFile="";
+      var foundimage=true;
+
+      //Called on error
+      websocket.onerror=function(){
+        alert("Something went wrong...");
+      }
+
+      //Called on message
+      websocket.onmessage=function(event){
+        imgFile=event.data;
+        if(imgFile=="notfound"){
+          alert("HIT does not exist!");
+          foundimage=false;
+        }else{
+          g.imgVal = './pictures/'+imgFile;
+          //alert('pictures/'+imgFile);
+          $('.zoom')[0].src = g.imgVal;
+          $('.zoom').attr('data-magnify-src', g.imgVal);
+        }
+        websocket.close();
+      }
+
+      //Called on close
+      websocket.onclose=function(){
+      }
+
+      //Auto close connection on exit
+      window.onbeforeunload=function(){
+        websocket.close();
+      }
+
+      //Called on connection established
+      websocket.onopen=function(){
+        var jsonObj={
+          msgtype:"getimage",
+          hitId:GetURLParam("hitId")
+        };
+        websocket.send(JSON.stringify(jsonObj));
+      }
     }
     changeSource();
 
@@ -290,46 +383,116 @@
     }
     initDraw();
 
+  	// Post data to AMT server
+  	// http://www.jb51.net/article/75819.htm
+  	function postData(url,params){
+  		var temp=document.createElement("form");
+  		temp.action=url;
+  		temp.method="post";
+  		temp.style.display="none";
+  		for(var x in params){
+  			var opt=document.createElement("textarea");
+  			opt.name=x;
+  			opt.value=params[x];
+  			temp.appendChild(opt);
+  		}
+  		document.body.appendChild(temp);
+  		temp.submit();
+  		return temp;
+  	}
+
     /*
      * Submit, undo, cancel
      */
 
     function btnFunc() {
         submit.onclick = function() {
-            function convert(val, prop) {
-                /*
-                 * val: The CSS value of the `prop` parameter below
-                 * prop: The CSS property (width or height)
-                 */
-                return Math.round(val * tempImg[prop] / image.children[0][prop]);
+
+          if(checkBoxes()){
+            if ($(magnifyIcon).hasClass('magnifyIcon')) {
+              destroy();
             }
-            if (checkBoxes()) {
-                if ($(magnifyIcon).hasClass('magnifyIcon')) {
-                    destroy();
-                }
-                var tempImg = new Image();
-                tempImg.src = g.imgVal;
-                console.log(
-                    'Image Dimensions\n' +
-                    'Native Width: ' + tempImg.width + 'px\n' +
-                    'Native Height: ' + tempImg.height + 'px'
-                );
-                for (i = 1, length = image.children.length; i < length; i++) {
-                    var imageRect = image.children[0].getBoundingClientRect();
-                    var boxRect = image.children[i].getBoundingClientRect();
-                    var x = Math.abs(boxRect.left - imageRect.left);
-                    var y = Math.abs(boxRect.top - imageRect.top);
-                    console.log(
-                        'Box ' + i + ' Dimensions\n' +
-                        'Type: ' + image.children[i].children[0].innerHTML + '\n' +
-                        'Width: ' + convert(image.children[i].offsetWidth, 'width') + '\n' +
-                        'Height: ' + convert(image.children[i].offsetHeight, 'height') + '\n' +
-                        'Relative Position: (' + convert(x, 'width') + 'px, ' + convert(y, 'height') + 'px)'
-                    );
-                }
-                changeSource();
-                cancel.click();
+
+            var websocket=new WebSocket(wsurl);
+            var jsonstr="";
+
+            //Called on error
+            websocket.onerror=function(){
+              alert("Something went wrong...");
             }
+
+			//Called on message
+			websocket.onmessage=function(event){
+				if(event.data=="ok"){
+
+          //Post data to AMT ExternalSubmit server
+          postData("https://workersandbox.mturk.com/mturk/externalSubmit",
+            {
+              assignmentId:GetURLParam("assignmentId"),
+              workerAnswer:jsonstr
+            }
+          );
+        }else{
+          alert("The server returned a error: "+event.data);
+        }
+        websocket.close();
+			}
+
+			//Called on close
+			websocket.onclose=function(){
+			}
+
+			//Auto close connection on exit
+			window.onbeforeunload=function(){
+				websocket.close();
+			}
+
+            //Called on connection established
+            websocket.onopen=function(){
+              function convert(val, prop) {
+                  /*
+                   * val: The CSS value of the `prop` parameter below
+                   * prop: The CSS property (width or height)
+                   */
+                  return Math.round(val * tempImg[prop] / image.children[0][prop]);
+              }
+
+              var tempImg=new Image();
+              tempImg.src=g.imgVal;
+
+              var jsonObj={
+                msgtype:"submit",
+                assignmentId:GetURLParam("assignmentId"),
+                hitId:GetURLParam("hitId"),
+                workerId:GetURLParam("workerId"),
+                imgFile:g.imgVal,
+                nwidth:tempImg.width,
+                nheight:tempImg.height,
+                rects:[]
+              }
+
+              for(i=1,length=image.children.length;i<length;i++){
+                var imageRect = image.children[0].getBoundingClientRect();
+                var boxRect = image.children[i].getBoundingClientRect();
+                var x = Math.abs(boxRect.left - imageRect.left);
+                var y = Math.abs(boxRect.top - imageRect.top);
+                var temp={
+                  num:i,
+                  type:image.children[i].children[0].innerHTML,
+                  width:convert(image.children[i].offsetWidth, 'width'),
+                  height:convert(image.children[i].offsetHeight, 'height'),
+                  x:convert(x, 'width'),
+                  y:convert(y, 'height')
+                }
+                jsonObj.rects.push(temp);
+              }
+              jsonstr=JSON.stringify(jsonObj);
+              console.log(jsonstr);
+              websocket.send(jsonstr);
+
+            }
+
+          }
         };
         undo.onclick = function() {
             if (checkBoxes()) {
